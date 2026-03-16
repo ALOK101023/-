@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-# नए वर्ज़न के लिए 'langchain_text_splitters' का उपयोग करें
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
@@ -15,21 +14,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- API Key सेटअप (Streamlit Secrets के लिए) ---
+# --- API Key सेटअप (Secrets से) ---
 if "OPENAI_API_KEY" in st.secrets:
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 else:
-    st.error("Secrets में 'OPENAI_API_KEY' नहीं मिला। कृपया डैशबोर्ड में Settings > Secrets में जाकर इसे जोड़ें।")
+    st.error("Secrets में 'OPENAI_API_KEY' नहीं मिला। कृपया इसे Streamlit Cloud सेटिंग्स में जोड़ें।")
     st.stop()
 
 # --- डेटा प्रोसेसिंग (RAG) ---
 @st.cache_resource
 def initialize_system():
-    if not os.path.exists("workers_rights.txt"):
-        st.error("workers_rights.txt फाइल नहीं मिली। कृपया इसे GitHub पर अपलोड करें।")
+    # फाइल चेक करना
+    file_path = "workers_rights.txt"
+    if not os.path.exists(file_path):
+        st.error(f"'{file_path}' फाइल नहीं मिली। कृपया इसे अपने GitHub रिपॉजिटरी में अपलोड करें।")
         return None
 
-    with open("workers_rights.txt", "r", encoding="utf-8") as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -42,14 +43,15 @@ def initialize_system():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
     prompt = PromptTemplate(
-        template="""आप एक कानूनी सहायक हैं जो भारतीय मजदूरों की मदद करते हैं। 
-        दिए गए संदर्भ (Context) के आधार पर सरल हिंदी में जवाब दें।
+        template="""आप एक कानूनी सहायक हैं। नीचे दिए गए संदर्भ (Context) के आधार पर मजदूरों के सवालों के जवाब दें।
         
+        नियम:
+        1. जवाब सरल हिंदी में दें।
+        2. यदि सवाल का जवाब संदर्भ में नहीं है, तो सामान्य जानकारी दें और हेल्पलाइन नंबर बताएं।
+        3. कानून का नाम (जैसे: Minimum Wages Act) जरूर लिखें।
+
         Context: {context}
         प्रश्न: {question}
-        
-        जवाब में कानून का नाम और हेल्पलाइन नंबर जरूर बताएं।
-        अंत में लिखें: "अधिक जानकारी के लिए श्रम विभाग की हेल्पलाइन 1800-11-1363 पर कॉल करें।"
         """,
         input_variables=['context', 'question']
     )
@@ -63,26 +65,18 @@ def initialize_system():
     )
     return chain
 
-# --- साइडबार (Sidepanel) ---
-with st.sidebar:
-    st.title("⚖️ सूचना पैनल")
-    st.markdown("### 🌐 भाषा / Language\nयह ऐप पूरी तरह **हिंदी** और **English** में काम करता है।")
-    st.divider()
-    st.info("💡 टिप: यदि मालिक पैसे नहीं दे रहा या ओवरटाइम नहीं दे रहा, तो आप यहाँ पूछ सकते हैं।")
-
 # --- मुख्य इंटरफेस ---
 st.title("⚖️ मजदूर अधिकार सहायक")
-st.caption("🚀 श्रमिक अधिकारों की जानकारी | Supports Hindi & English")
+st.caption("श्रमिक अधिकारों की जानकारी | Supports Hindi & English")
 
 try:
     chain = initialize_system()
     if chain:
-        # --- ऑटोमैटिक ऑप्शन (Pills) ---
+        # त्वरित सुझाव (Pills)
         st.write("### मुख्य विषय चुनें:")
-        options = ["न्यूनतम वेतन क्या है?", "मालिक पैसे नहीं दे रहा", "ओवरटाइम के नियम", "PF का पैसा", "साप्ताहिक छुट्टी"]
+        options = ["न्यूनतम वेतन की जानकारी", "मालिक पैसे नहीं दे रहा", "ओवरटाइम के नियम", "पीएफ (PF) के अधिकार"]
         selected_pill = st.pills("विषय:", options, selection_mode="single", label_visibility="collapsed")
 
-        # चैट हिस्ट्री
         if "messages" not in st.session_state:
             st.session_state.messages = []
 
@@ -90,11 +84,10 @@ try:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        # इनपुट हैंडलिंग
         user_query = None
         if selected_pill:
             user_query = selected_pill
-        if prompt_input := st.chat_input("अपनी समस्या यहाँ लिखें..."):
+        if prompt_input := st.chat_input("अपनी समस्या यहाँ विस्तार से लिखें..."):
             user_query = prompt_input
 
         if user_query:
@@ -103,10 +96,10 @@ try:
                 st.markdown(user_query)
             
             with st.chat_message("assistant"):
-                with st.spinner("कानूनी जानकारी खोजी जा रही है..."):
+                with st.spinner("जानकारी खोजी जा रही है..."):
                     response = chain.invoke(user_query)
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
 
 except Exception as e:
-    st.error(f"सिस्टम एरर: {str(e)}")
+    st.error(f"सिस्टम एरर: {e}")
